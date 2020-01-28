@@ -111,6 +111,7 @@
 #include <ModelEntityItem.h>
 #include <NetworkAccessManager.h>
 #include <NetworkingConstants.h>
+#include <MetaverseAPI.h>
 #include <ObjectMotionState.h>
 #include <OctalCode.h>
 #include <OctreeSceneStats.h>
@@ -1216,7 +1217,7 @@ Application::Application(int& argc, char** argv, QElapsedTimer& startupTimer, bo
 
     // set the account manager's root URL and trigger a login request if we don't have the access token
     accountManager->setIsAgent(true);
-    accountManager->setAuthURL(NetworkingConstants::METAVERSE_SERVER_URL());
+    accountManager->setAuthURL(MetaverseAPI::getCurrentMetaverseServerURL());
     if (!accountManager->hasKeyPair()) {
         accountManager->generateNewUserKeypair();
     }
@@ -3202,10 +3203,30 @@ void Application::initializeUi() {
     // Allow remote QML content from trusted sources ONLY
     {
         auto defaultUrlValidator = OffscreenQmlSurface::getUrlValidator();
-        auto newValidator = [=](const QUrl& url)->bool {
-            if (AUTHORIZED_EXTERNAL_QML_SOURCE.isParentOf(url)) {
-                return true;
+        auto newValidator = [=](const QUrl& url) -> bool {
+            QString whitelistPrefix = "[WHITELIST ENTITY SCRIPTS]";
+            QList<QString> safeURLS = { "" };
+            safeURLS += qEnvironmentVariable("EXTRA_WHITELIST").trimmed().split(QRegExp("\\s*,\\s*"), QString::SkipEmptyParts);
+
+            // PULL SAFEURLS FROM INTERFACE.JSON Settings
+
+            QVariant raw = Setting::Handle<QVariant>("private/settingsSafeURLS").get();
+            QStringList settingsSafeURLS = raw.toString().trimmed().split(QRegExp("\\s*[,\r\n]+\\s*"), QString::SkipEmptyParts);
+            safeURLS += settingsSafeURLS;
+
+            // END PULL SAFEURLS FROM INTERFACE.JSON Settings
+
+            bool isInWhitelist = false;  // assume unsafe
+            for (const auto& str : safeURLS) {
+                if (!str.isEmpty() && str.endsWith(".qml") && url.toString().endsWith(".qml") &&
+                    url.toString().startsWith(str)) {
+                    qCDebug(interfaceapp) << "Found matching url!" << url.host();
+                    isInWhitelist = true;
+                    return true;
+                }
             }
+
+            qCDebug(interfaceapp) << "No matching url" << url.host();
             return defaultUrlValidator(url);
         };
         OffscreenQmlSurface::setUrlValidator(newValidator);
@@ -7729,7 +7750,7 @@ bool Application::askToReplaceDomainContent(const QString& url) {
             static const QString infoText = simpleWordWrap("Your domain's content will be replaced with a new content set. "
                 "If you want to save what you have now, create a backup before proceeding. For more information about backing up "
                 "and restoring content, visit the documentation page at: ", MAX_CHARACTERS_PER_LINE) +
-                "\nhttps://docs.highfidelity.com/create-and-explore/start-working-in-your-sandbox/restoring-sandbox-content";
+                "\nhttps://docs.projectathena.dev/host/maintain-domain/backup-domain.html";
 
             ModalDialogListener* dig = OffscreenUi::asyncQuestion("Are you sure you want to replace this domain's content set?",
                                                                   infoText, QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
@@ -8483,7 +8504,7 @@ void Application::loadAddAvatarBookmarkDialog() const {
 void Application::loadAvatarBrowser() const {
     auto tablet = dynamic_cast<TabletProxy*>(DependencyManager::get<TabletScriptingInterface>()->getTablet("com.highfidelity.interface.tablet.system"));
     // construct the url to the marketplace item
-    QString url = NetworkingConstants::METAVERSE_SERVER_URL().toString() + "/marketplace?category=avatars";
+    QString url = MetaverseAPI::getCurrentMetaverseServerURL().toString() + "/marketplace?category=avatars";
 
     QString MARKETPLACES_INJECT_SCRIPT_PATH = "file:///" + qApp->applicationDirPath() + "/scripts/system/html/js/marketplacesInject.js";
     tablet->gotoWebScreen(url, MARKETPLACES_INJECT_SCRIPT_PATH);
